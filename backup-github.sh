@@ -8,16 +8,16 @@ GHBU_GITHOST=${GHBU_GITHOST-"github.com"}                            # the GitHu
  
 # I recommend using an API token so it is easily trackable and removable.
 # Note that you MUST have SSH keys for a user with the access to all repos set up
-GHBU_TOKEN=${GHBU_TOKEN-"<CHANGE-ME>"}  # the token to use for API Authentication
-GHBU_GIT_CLONE_CMD="git clone --quiet --mirror git@${GHBU_GITHOST}:" # base command to use to clone GitHub repos
-GHBU_APIOPTS="access_token=${GHBU_TOKEN}&"
+#GHBU_TOKEN=${GHBU_TOKEN-""}  # the token to use for API Authentication
+#GHBU_GIT_CLONE_CMD="git clone --quiet --mirror git@${GHBU_GITHOST}:" # base command to use to clone GitHub repos
+#GHBU_APIOPTS="access_token=${GHBU_TOKEN}&"
  
 # You can use Username + Password if you would like
 # UNAME+PASSWD must be used if you don't have ssh keys set up
-# GHBU_UNAME=${GHBU_UNAME-"<CHANGE-ME>"}                                # the username of a GitHub account (to use with the GitHub API)
-# GHBU_PASSWD=${GHBU_PASSWD-"<CHANGE-ME>"}                               # the password for that account 
-# GHBU_GIT_CLONE_CMD="git clone --quiet --mirror https://${GHBU_UNAME}:${GHBU_PASSWD}@${GHBU_GITHOST}/" # base command to use to clone GitHub repos
-# GHBU_CURLOPTS="-u ${GHBU_UNAME}:${GHBU_PASSWD}"
+GHBU_UNAME=${GHBU_UNAME-"SPlanzer"}                                # the username of a GitHub account (to use with the GitHub API)
+GHBU_PASSWD=${GHBU_PASSWD-"<TOKEN>"}                               # the password for that account 
+GHBU_GIT_CLONE_CMD="git clone --quiet --mirror https://${GHBU_UNAME}:${GHBU_PASSWD}@${GHBU_GITHOST}/" # base command to use to clone GitHub repos
+GHBU_CURLOPTS="-u ${GHBU_UNAME}:${GHBU_PASSWD}"
  
 GHBU_PRUNE_OLD=${GHBU_PRUNE_OLD-true}                                # when `true`, old backups will be deleted
 GHBU_PRUNE_AFTER_N_DAYS=${GHBU_PRUNE_AFTER_N_DAYS-14}                 # the min age (in days) of backup files to delete
@@ -35,7 +35,7 @@ function check {
     echo "       (at line ${BASH_LINENO[0]} of file $0.)"  >&2
     echo "       Aborting." >&2
     exit $status
-  fi
+  fi 
 }
  
 # The function `tgz` will create a gzipped tar archive of the specified file ($1) and then remove the original
@@ -51,12 +51,14 @@ check mkdir -p $GHBU_BACKUP_DIR
 $GHBU_SILENT || echo "Fetching list of repositories for ${GHBU_ORG}..."
  
 REPOURL="${GHBU_API}/orgs/${GHBU_ORG}/repos?${GHBU_APIOPTS}per_page=2"
- 
+
 REPOLIST=""
 while [ $REPOURL ]; do
   REPOREQCONTENT=`curl --silent -i $GHBU_CURLOPTS $REPOURL -q`
+
   REPOURL=`check echo "${REPOREQCONTENT}" | grep "\"next\"" | check awk -F'<' '{print $2}' | check sed -e 's/>;.*//g'`
-  REPOLIST=$REPOLIST`check echo "${REPOREQCONTENT}" | grep "\"name\"" | check awk -F': "' '{print $2}' | check sed -e 's/",//g'`$'\n'
+  REPOLIST=$REPOLIST`check echo "${REPOREQCONTENT}" | grep "\"full_name\"" | check awk -F': "' '{print $2}' | check sed -e 's/",//g'`$'\n'
+
 done
  
 $GHBU_SILENT || echo "found `echo $REPOLIST | wc -w` repositories."
@@ -65,14 +67,15 @@ $GHBU_SILENT || echo "found `echo $REPOLIST | wc -w` repositories."
 $GHBU_SILENT || (echo "" && echo "=== BACKING UP ===" && echo "")
  
 for REPO in $REPOLIST; do
-   $GHBU_SILENT || echo "Backing up ${GHBU_ORG}/${REPO}"
-   check ${GHBU_GIT_CLONE_CMD}${GHBU_ORG}/${REPO}.git ${GHBU_BACKUP_DIR}/${GHBU_ORG}-${REPO}-${TSTAMP}.git && tgz ${GHBU_BACKUP_DIR}/${GHBU_ORG}-${REPO}-${TSTAMP}.git
+   $GHBU_SILENT || echo "Backing up ${REPO}"
+   check ${GHBU_GIT_CLONE_CMD}${REPO}.git ${GHBU_BACKUP_DIR}/${GHBU_ORG}-${REPO}-${TSTAMP}.git && tgz ${GHBU_BACKUP_DIR}/${GHBU_ORG}-${REPO}-${TSTAMP}.git
  
-   $GHBU_SILENT || echo "Backing up ${GHBU_ORG}/${REPO}.wiki (if any)"
-   ${GHBU_GIT_CLONE_CMD}${GHBU_ORG}/${REPO}.wiki.git ${GHBU_BACKUP_DIR}/${GHBU_ORG}-${REPO}.wiki-${TSTAMP}.git 2>/dev/null && tgz ${GHBU_BACKUP_DIR}/${GHBU_ORG}-${REPO}.wiki-${TSTAMP}.git
+   $GHBU_SILENT || echo "Backing up ${REPO}.wiki (if any)"
+   ${GHBU_GIT_CLONE_CMD}${REPO}.wiki.git ${GHBU_BACKUP_DIR}/${GHBU_ORG}-${REPO}.wiki-${TSTAMP}.git 2>/dev/null && tgz ${GHBU_BACKUP_DIR}/${GHBU_ORG}-${REPO}.wiki-${TSTAMP}.git
  
-   $GHBU_SILENT || echo "Backing up ${GHBU_ORG}/${REPO} issues"
-   check curl --silent $GHBU_CURLOPTS ${GHBU_API}/repos/${GHBU_ORG}/${REPO}/issues?${GHBU_APIOPTS} -q > ${GHBU_BACKUP_DIR}/${GHBU_ORG}-${REPO}.issues-${TSTAMP} && tgz ${GHBU_BACKUP_DIR}/${GHBU_ORG}-${REPO}.issues-${TSTAMP}
+   $GHBU_SILENT || echo "Backing up ${REPO} issues"
+   check curl --silent $GHBU_CURLOPTS ${GHBU_API}/repos/${REPO}/issues?${GHBU_APIOPTS} -q > ${GHBU_BACKUP_DIR}/${GHBU_ORG}-${REPO}.issues-${TSTAMP} && tgz ${GHBU_BACKUP_DIR}/${GHBU_ORG}-${REPO}.issues-${TSTAMP}
+
 done
  
 if $GHBU_PRUNE_OLD; then
