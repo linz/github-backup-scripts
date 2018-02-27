@@ -15,7 +15,7 @@ GHBU_GITHOST=${GHBU_GITHOST-"github.com"}                            # the GitHu
 # You can use Username + Password if you would like
 # UNAME+PASSWD must be used if you don't have ssh keys set up
 GHBU_UNAME=${GHBU_UNAME-"SPlanzer"}                                # the username of a GitHub account (to use with the GitHub API)
-GHBU_PASSWD=${GHBU_PASSWD-"<TOKEN>"}                               # the password for that account 
+GHBU_PASSWD=${GHBU_PASSWD-<API_KEY>}                               # the password for that account 
 GHBU_GIT_CLONE_CMD="git clone --quiet --mirror https://${GHBU_UNAME}:${GHBU_PASSWD}@${GHBU_GITHOST}/" # base command to use to clone GitHub repos
 GHBU_CURLOPTS="-u ${GHBU_UNAME}:${GHBU_PASSWD}"
  
@@ -42,48 +42,46 @@ function check {
 function tgz {
    check tar zcf $1.tar.gz $1 && check rm -rf $1
 }
- 
+
 $GHBU_SILENT || (echo "" && echo "=== INITIALIZING ===" && echo "")
- 
+
 $GHBU_SILENT || echo "Using backup directory $GHBU_BACKUP_DIR"
 check mkdir -p $GHBU_BACKUP_DIR
- 
+
 $GHBU_SILENT || echo "Fetching list of repositories for ${GHBU_ORG}..."
- 
-REPOURL="${GHBU_API}/orgs/${GHBU_ORG}/repos?${GHBU_APIOPTS}per_page=2"
 
-REPOLIST=""
-while [ $REPOURL ]; do
-  REPOREQCONTENT=`curl --silent -i $GHBU_CURLOPTS $REPOURL -q`
-
-  REPOURL=`check echo "${REPOREQCONTENT}" | grep "\"next\"" | check awk -F'<' '{print $2}' | check sed -e 's/>;.*//g'`
-  REPOLIST=$REPOLIST`check echo "${REPOREQCONTENT}" | grep "\"full_name\"" | check awk -F': "' '{print $2}' | check sed -e 's/",//g'`$'\n'
-
+# cycling through pages as github API limits entries to 100 per page...
+PAGE=0
+while true; do
+  let PAGE++
+  $GHBU_SILENT || echo "getting page ${PAGE}"
+  REPOLIST_TMP=`check curl --silent -u $GHBU_UNAME:$GHBU_PASSWD ${GHBU_API}/orgs/${GHBU_ORG}/repos\?page=${PAGE}\&per_page=90 -q -k | grep "\"full_name\"" | cut -d'/' -f2 | sed -e 's/",//g'`
+  if [ -z "${REPOLIST_TMP}" ]; then break; fi
+  REPOLIST="${REPOLIST} ${REPOLIST_TMP}"
 done
- 
+
 $GHBU_SILENT || echo "found `echo $REPOLIST | wc -w` repositories."
- 
- 
-$GHBU_SILENT || (echo "" && echo "=== BACKING UP ===" && echo "")
- 
-for REPO in $REPOLIST; do
-   $GHBU_SILENT || echo "Backing up ${REPO}"
-   check ${GHBU_GIT_CLONE_CMD}${REPO}.git ${GHBU_BACKUP_DIR}/${GHBU_ORG}-${REPO}-${TSTAMP}.git && tgz ${GHBU_BACKUP_DIR}/${GHBU_ORG}-${REPO}-${TSTAMP}.git
- 
-   $GHBU_SILENT || echo "Backing up ${REPO}.wiki (if any)"
-   ${GHBU_GIT_CLONE_CMD}${REPO}.wiki.git ${GHBU_BACKUP_DIR}/${GHBU_ORG}-${REPO}.wiki-${TSTAMP}.git 2>/dev/null && tgz ${GHBU_BACKUP_DIR}/${GHBU_ORG}-${REPO}.wiki-${TSTAMP}.git
- 
-   $GHBU_SILENT || echo "Backing up ${REPO} issues"
-   check curl --silent $GHBU_CURLOPTS ${GHBU_API}/repos/${REPO}/issues?${GHBU_APIOPTS} -q > ${GHBU_BACKUP_DIR}/${GHBU_ORG}-${REPO}.issues-${TSTAMP} && tgz ${GHBU_BACKUP_DIR}/${GHBU_ORG}-${REPO}.issues-${TSTAMP}
 
+
+$GHBU_SILENT || (echo "" && echo "=== BACKING UP ===" && echo "")
+
+for REPO in $REPOLIST; do
+   $GHBU_SILENT || echo "Backing up ${GHBU_ORG}/${REPO}"
+   check ${GHBU_GIT_CLONE_CMD}${GHBU_ORG}/${REPO}.git ${GHBU_BACKUP_DIR}/${GHBU_ORG}-${REPO}-${TSTAMP}.git && tgz ${GHBU_BACKUP_DIR}/${GHBU_ORG}-${REPO}-${TSTAMP}.git
+
+   $GHBU_SILENT || echo "Backing up ${GHBU_ORG}/${REPO}.wiki (if any)"
+   ${GHBU_GIT_CLONE_CMD}${GHBU_ORG}/${REPO}.wiki.git ${GHBU_BACKUP_DIR}/${GHBU_ORG}-${REPO}.wiki-${TSTAMP}.git 2>/dev/null && tgz ${GHBU_BACKUP_DIR}/${GHBU_ORG}-${REPO}.wiki-${TSTAMP}.git
+
+   $GHBU_SILENT || echo "Backing up ${GHBU_ORG}/${REPO} issues"
+   check curl --silent -u $GHBU_UNAME:$GHBU_PASSWD ${GHBU_API}/repos/${GHBU_ORG}/${REPO}/issues -q > ${GHBU_BACKUP_DIR}/${GHBU_ORG}-${REPO}.issues-${TSTAMP} && tgz ${GHBU_BACKUP_DIR}/${GHBU_ORG}-${REPO}.issues-${TSTAMP}
 done
- 
+
 if $GHBU_PRUNE_OLD; then
   $GHBU_SILENT || (echo "" && echo "=== PRUNING ===" && echo "")
   $GHBU_SILENT || echo "Pruning backup files ${GHBU_PRUNE_AFTER_N_DAYS} days old or older."
   $GHBU_SILENT || echo "Found `find $GHBU_BACKUP_DIR -name '*.tar.gz' -mtime +$GHBU_PRUNE_AFTER_N_DAYS | wc -l` files to prune."
   find $GHBU_BACKUP_DIR -name '*.tar.gz' -mtime +$GHBU_PRUNE_AFTER_N_DAYS -exec rm -fv {} > /dev/null \; 
 fi
- 
+
 $GHBU_SILENT || (echo "" && echo "=== DONE ===" && echo "")
 $GHBU_SILENT || (echo "GitHub backup completed." && echo "")
